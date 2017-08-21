@@ -1,0 +1,410 @@
+---
+title: "Topic Modeling"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: spacelab
+---
+# Introduction
+
+How to select the hyperparameters in topic models is the most crucial part of any topic modeling task. 
+
+For example, the **alpha** parameter controls the convergence of document-topic distribution. A small alpha gives a strong weight to the most influential topic for the document, meaning the model will more likely to consider the document is composed of a small number of topics, and vice versa. *A  rule of thumb given by Griffiths & Steyvers(2004)  is to use   50/k, where k is the number of topics.*
+
+Another example is **beta** (or delta in Gibbs Sampling code), which controls the convergence of the word distribution under each topic. Similar to alpha, when a small beta (delta) is given, the model will most likely to choose a common word from the topic, leading to several peaks in the topic-word distribution. As beta grows bigger, dramatic peaks will start dissappearing, and the model will be more "flat".  *The rule of thumb is to set beta (delta) equal to 0.1.*
+
+While the above mentioned parameters have a general strategy for selection, how to determine the **cut-off point for top words** and **the number of topics** is not covered. There is not really one best metric for these, and may depend on the task at hand. For example, if the user wishes to get a big picture of the corpus by topic modeling, the user should use a small number of topics to avoid information overloading, but oftentimes autonomous methods lead to a higher number of topics. 
+
+In this project, we are to explore two tasks:
+
+1. How many top words should be picked from the topics:
+    + Cut-off point
+2. How many topics should be used:
+    + Perplexity (OPTIONAL)
+    + Extrinsic Method (OPTIONAL)
+    + Intrinsic Method (OPTIONAL)
+    + Autonomous methods
+    + Evaluating the results
+    
+
+## Submission Instructions
+Complete the missing components of this RMD file and then submit a zip file that contains this RMD file and the generated PDF or html document showing the code and its output.
+
+
+
+## Loading Relevant Packages
+Here are some packages you will probably want to load. You may have to install these packages if you haven't before. Also, if you use other packages in the rest of your code, add the packages to this list.
+```{r message=FALSE, warning=FALSE}
+#install.packages("topicmodels")
+#install.packages("ldatuning")
+#install.packages("SnowballC")
+library(topicmodels)
+library(ggplot2)
+library(tm)
+library(ldatuning)
+library(e1071)
+library(stringr)
+library(SnowballC)
+SEED = 3456
+data("AssociatedPress", package="topicmodels")
+setwd("~/Desktop/DS/AMLHW/Wk7")
+```
+
+
+# Selecting Top Words
+To determine the number of top words to be selected, we can leverage the posterior probabilities of p(Word|Topic) and use the **elbow method**. The elbow method is an inexact technique that can be used in various applications to help determine a good value for some parameter by looking at a plot, where the x-axis contains the parameter value (in this case, number of words) and the y-axis contains the variable of interest (in this case, probabilities), and determining an x-value where there is an "elbow" or different rate of change that creates an angle in the plot. 
+
+First, let's run LDA with 20 topics. You can review the [documentation](https://cran.r-project.org/web/packages/topicmodels/topicmodels.pdf) to see more information about this package.
+```{r}
+LDA_model <- LDA(AssociatedPress, control=list(iter=20, seed=SEED), k=20, method="Gibbs")
+```
+
+Next, find the top 100 probabilities, p(Word|Topic), and their corresponding words. To do this, for each word (column in the @beta matrix of the LDA model), find the max p(Word|Topic) value. This will give you a list of the highest probabilities each word has in all the documents. Sort this list to find the top-100.
+```{r}
+# YOUR CODE HERE
+# Understanding LDA model
+dim(LDA_model@beta) # beta is topic word distribution having 20 rows 10473 columns
+class(LDA_model@beta) # LDA_model@beta is Matrix 20X10473
+length(LDA_model@terms) # 10473 terms
+LDA_model@terms[1:5] # First 5 words  
+#exp(LDA_model@beta[,1:5]) #  Probability  1st 5 words for each 20 topics  
+#sum( exp(LDA_model@beta[1,]) ) #  Sum of Probability of  all 10,473 words topic 1
+
+# Max proabilities for each word across topics
+max_word_prob <- apply(exp(LDA_model@beta), 2, max) 
+
+#sorting and keeping original index
+sorted_prob_list <- sort(max_word_prob, decreasing=T, index.return=T)
+
+LDA_model@terms[sorted_prob_list$ix[1:100]] # List of 100 words
+
+```
+
+
+Now, plot the top-100 values.
+```{r}
+# YOUR CODE HERE
+# Plotting probabilities of 100 words
+plot( head(sorted_prob_list$x,100), xlab="Words", ylab="Max Probability")
+abline(v=24)
+```
+Based on your plot, what seems like a reasonable cut off point for the number of top words? Print these words.
+Ans: 24 words should be enough beyound that probabilities of the words are not changing enough to make much differentiation.
+```{r}
+# YOUR CODE HERE
+#Top 24 words
+LDA_model@terms[sorted_prob_list$ix[1:24]]
+```
+
+# Determining the Number of Topics
+## Perplexity (OPTIONAL)
+Perplexity often requires splitting the dataset into a training and test set to evaluate the model. The intuition behind perplexity is to compare the word log-likelihood with the test data. If highly probable words in the model are also common words in test data, then it means the topic model summarizes the data well.
+
+Build ten LDA models by spanning the number of topics k from 20 to 200 in increments of 20. Use the first 1500 documents of AssociatedPress as the training set and the remaining documents as the test set (for the calculation of perplexity). Plot the perplexity values for these ten LDA models, which you can determine using the `perplexity` function from the topicmodels package.
+
+```{r}
+# YOUR CODE HERE
+```
+
+Note that perplexity drops infinitely as number of topic grows. So instead of finding the minimum perplexity, common practice selects the elbow point of perplexity growth. 
+
+## Extrinsic Topic Coherence (OPTIONAL)
+
+Extrinsic (in contrast to intrinsic) requires an additional dataset. The extrinsic topic coherence measure takes the top N words in each topic and sees how often does the word pair appears in a common corpus (e.g., Wikipedia). 
+
+Here we use the Normalized Pointwise Mutual Information (NPMI) metric (Nguyen et al, 2015), though there are many other extinsic metrics available that work similarly. 
+
+For simplicity and performance reasons (loading Wikipeida is very slow), we use the Yelp dataset and split it into training (1k reviews) and a common corpus (19K reviews), testing the model on the latter part.  But notice this is not a common approach, and, in practice, should be performed on a larger corpus.
+
+Also, in the original paper (Nguyen et al, 2015), the author uses a sliding window approach to model word pair co-occurence. For simplicity, we take co-occurence based on co-occurred words in documents, and further penalized it to make NPMI measure negative. 
+First, lets load the Yelp dataset and clean it up.
+```{r}
+yelp = read.csv("yelp.txt", header=FALSE, quote="", sep="|")
+yelp_text =  as.list(levels(yelp$V1))
+clean_yelp = gsub("&amp", "", yelp_text)
+clean_yelp = gsub("(RT|via)((?:\\b\\W*@\\w+)+)", "", clean_yelp)
+clean_yelp = gsub("@\\w+", "", clean_yelp)
+clean_yelp = gsub("[[:punct:]]", "", clean_yelp)
+clean_yelp = gsub("[[:digit:]]", "", clean_yelp)
+clean_yelp = gsub("http\\w+", "", clean_yelp)
+clean_yelp = gsub("[ \t]{2,}", " ", clean_yelp)
+clean_yelp = gsub("[ \n]{2,}", " ", clean_yelp) 
+clean_yelp = gsub("^\\s+|\\s+$", "", clean_yelp) 
+clean_yelp <- str_replace_all(clean_yelp," "," ")
+clean_yelp <- iconv(clean_yelp, 'UTF-8', 'ASCII',sub = "")
+
+yelp_Corpus <- Corpus(VectorSource(clean_yelp))
+yelp_matrix <- DocumentTermMatrix(yelp_Corpus,control = list(tolower = TRUE, sparse=TRUE, stemming = TRUE, stopwords = TRUE, minWordLength = 3,removeNumbers = TRUE, removePunctuation = TRUE))
+yelp_matrix <- removeSparseTerms(yelp_matrix, 0.995)
+rowTotals <- apply(yelp_matrix , 1, sum) 
+yelp_matrix   <- yelp_matrix[rowTotals> 0, ]  #removing documents that became empty after processing  
+yelp_matrix <- as.matrix(yelp_matrix)
+```
+
+Next, we will create the NPMI and coherence function.
+```{r}
+NPMI = function(DT, m,l){  
+  number_of_documents = dim(DT)[1]
+  p_ml = length(which(DT[,l] >0 & DT[,m] >0))  / (number_of_documents * number_of_documents)
+  
+  p_l = length(which(DT[,l] >0))/number_of_documents
+  
+  p_m = length(which(DT[,m] >0))/number_of_documents
+  # p_ml: probability of word m and word l both appears in a document
+  # p_l: probability of word l appears in a document
+  # p_m: probability of word m appears in a document
+  if (p_ml==0)
+    return(0)
+  else
+    return( log( p_ml  / (p_l * p_m)) / -log(p_ml) )
+  
+}
+
+compute_c <- function(LDA_model, dataset,  top_N, method=c("LCP", "NPMI"), top_K= 0){
+  c = list()
+  if(method == "LCP")
+    method = LCP
+  else
+    method = NPMI
+  top_words <- apply(t(LDA_model), 2, FUN = function(x) sort(x, decreasing = T,index.return = T)$ix[1:top_N]) #find top N words
+
+  #the following nested for-loop computes NPMI or LCP for all word pairs in top N for all topics
+  for( i in 1:dim(top_words)[2]){
+    temp_c = 0
+    for( m in 2:top_N){
+      for(l in 1: (m-1)){
+          temp_c = temp_c + method(dataset,top_words[m,i],top_words[l,i])
+      }
+    }
+    c[[i]] = temp_c
+  }
+  c = as.numeric(c)
+  if(top_K == 0)
+    return( sum(c)/dim(LDA_model)[1])
+  else
+    return( sum(sort(c, decreasing = T,index.return = T)$x[1:top_K]) / top_K  )
+}
+```
+
+Build ten LDA models by spanning the number of topics k from 10 to 100 in increments of 10. Use the first 1000 documents of Yelp as the training set and the remaining documents of Yelp as the test set (for the calculation of coherence). Plot the NPMI coherence values (`compute_c` function) for these fifteen LDA models. For your NPMI coherence calculation, you can use top\_N=15. Since we have a small training set, increase the iterations for LDA to 100.
+
+```{r}
+# YOUR CODE HERE
+```
+
+Similar to perplexity, selecting a cut-off point is better since it grows infinitely.
+
+
+## Intrinsic Topic Coherence (OPTIONAL)
+
+Similar to extrinsic methods, the intrinsic topic coherence measure takes the top N words in each topic, and sees how often does the word pair appear in the training corpus. Similar to perplexity, selecting a cut-off point is better since it grows infinitely.
+
+First, let's define the log-likelihood metric for intrinsic coherence.
+```{r}
+LCP = function(DT, m,l ){  
+  D_ml = length(which(DT[,m] >0 & DT[,l] >0)) 
+  D_l = length(which(DT[,l] >0))
+  D_m = length(which(DT[,m] >0))
+  # D_ml: Number of documents that contain both of word m and word l
+  # D_l: Number of documents that contain word l
+  # D_m: Number of documents that contain word m 
+  
+  return(log( (D_ml + 1) / D_l))
+}
+```
+
+Using the same ten models generated in the previous section, plot the LCP coherence values (`compute_c` function).
+```{r}
+# YOUR CODE HERE
+```
+
+## Autonomous Methods
+Now, we will explore methods for determining the number of topics to use by making use of the methods in the [ldatuning package](https://cran.r-project.org/web/packages/ldatuning/vignettes/topics.html).
+
+
+```{r Finding Topic Numbers,  message=FALSE}
+dtm <- AssociatedPress[1:10, ]
+
+result <- FindTopicsNumber(
+  dtm,
+  topics = seq(from = 2, to = 15, by = 1),
+  metrics = c("Griffiths2004", "CaoJuan2009", "Arun2010"),
+  method = "Gibbs",
+  control = list(seed =SEED)
+)
+
+FindTopicsNumber_plot(result)
+```
+
+This plot contains 3 different methods to determine the best number of topics. Depending on the method, determining the optimal number of topics will be achieved by minimizing or maximizing the value along the y-axis. For example, the best number of topics based on Griffiths2004 will be 5, generally between 5-7 for Arun2010, and CaoJuan2009 is not too informative in this case. Based on these results, we can pick 5 as the optimal number of topics as the models seem to somewhat agree around this value. 
+
+
+Explanation for Griffiths2004 method:
+  The intuition behind this method is to compare the sum of word log-likelihood from the model. The higher the sum is, the more likely the model can generate the observed data. This method can work with using just the training data, and is similar to the perplexity idea in the optional section. 
+
+Explanation for CaoJuan2009 method:
+  Intuition: For a good topic model, the distribution of topic A over words and topic B over words should be distinct.
+  CaoJuan2009 method sums up the cosine similarity between all topic pairs from the model (T1 with T2, T1 with T3, ...), the lower the sum is, the better the model. Similar to Griffiths2004 method and the instrinsic method, it works just using the training data.
+  
+Explanation for Arun2010 method:
+  Arun2010 idea assumes LDA as a matrix factorization method which splits the document-word frequency matrix into two matrices: M1 for (Topic, Word) and M2 for (Document,Topic). When holding all other parameters fixed, the quality of the factorization thus depends on the number of topics. Smaller values indicate the difference between M1 and M2 is smaller, thus the better the model is. 
+
+## Evaluating the results
+However, the result of LDA can be used on many different applications, such as exploring the major theme of the documents or classifying documents based on topic distribution. These applications can lead to a different "ideal" number of topics. 
+In the following, build a classifier for the sentiment of a movie dataset by LDA, and see what number of topics gives the best result. 
+
+A way to build the classifier based on LDA is to take the all P(topic|doc) as features, for example like the following.
+```{r message=FALSE}
+features= LDA_model@gamma
+```
+
+Use the following code to help you load and parse the data.
+```{r text_cleaning}
+
+mr_data <- read.csv("mr.txt",stringsAsFactors = FALSE, header=F,  quote = "",sep=":")
+
+train_set = mr_data[c(1:400,5001:5400),]
+test_set = mr_data[c(1101:1120,6001:6020),]
+
+
+clean_data <- function(x){
+  
+  text =  as.list(x)  
+  clean_text = gsub("&amp", "", text)
+  clean_text = gsub("(RT|via)((?:\\b\\W*@\\w+)+)", "", clean_text)
+  clean_text = gsub("@\\w+", "", clean_text)
+  clean_text = gsub("[[:punct:]]", "", clean_text)
+  clean_text = gsub("[[:digit:]]", "", clean_text)
+  clean_text = gsub("http\\w+", "", clean_text)
+  clean_text = gsub("[ \t]{2,}", " ", clean_text)
+  clean_text = gsub("[ \n]{2,}", " ", clean_text) 
+  clean_text = gsub("^\\s+|\\s+$", "", clean_text) 
+  clean_text <- str_replace_all(clean_text," "," ")
+  clean_text <- iconv(clean_text, 'UTF-8', 'ASCII',sub = "")
+  
+  Corpus <- Corpus(VectorSource(clean_text))
+  tm <- DocumentTermMatrix(Corpus,control = list(tolower = TRUE, sparse=TRUE,  stemming= TRUE,stopwords = TRUE, minWordLength = 3,removeNumbers = TRUE, removePunctuation = TRUE))
+  tm <- removeSparseTerms(tm, 0.995)
+}
+
+train_text = clean_data(train_set$V2)
+rowTotals <- apply(train_text , 1, sum) 
+removed_rows = which(rowTotals == 0)
+train_text   <- train_text[rowTotals> 0, ]  #removing documents that became empty after processing  
+train_text <- as.matrix(train_text)
+train_set = data.frame(labels = train_set$V1[-removed_rows], features = train_text)
+
+
+test_text = clean_data(test_set$V2)
+test_text <- as.matrix(test_text)
+test_set = data.frame(labels = test_set$V1, features = test_text)
+```
+
+Use the following code to train LDA models, and apply the models to test data.
+```{r }
+LDA_models = sapply(seq(from = 2, to = 20, by = 2), function(x)  LDA(train_text,control = list(iter = 200,seed=SEED) ,k = x, method = "Gibbs")  )
+
+test_models = sapply(LDA_models, function(x) LDA(test_text,model = x, ,control = list(seed= SEED,estimate.beta = F , iter = 200)  ))   
+
+```
+
+Use the following code to train SVM models to classify.
+```{r  message=FALSE,fig.height=3.5, fig.width=9}
+training_features = sapply( LDA_models, function(x)  x@gamma)
+testing_features = sapply( test_models, function(x)  x@gamma)
+training_data = data.frame(training_features[1], y =as.factor(train_set$labels))
+
+
+run_svm <- function(train_model,test_model, train_labels, test_labels){
+  train_features = train_model@gamma
+  train_DF = data.frame(train_features,y = as.factor(train_labels))
+  
+  testing_features = test_model@gamma
+  test_DF = data.frame(testing_features, y = as.factor(test_labels))
+  
+  svm_model= svm(y ~ ., data=train_DF)
+  pred <- predict(svm_model,testing_features )
+  accuracy = length(which((pred== test_DF$y))) / dim(test_DF)[1]
+  return(accuracy)
+}
+
+accuracies = apply(cbind(LDA_models,test_models), 1,function(models) run_svm(models[[1]], models[[2]],as.factor(train_set[,1]),as.factor(test_set[,1] )))
+```
+
+Finally, plot the classification accuracies using different topic models.
+```{r}
+# YOUR CODE HERE
+qplot( x=seq(from = 2, to = 20, by = 2), y= accuracies, geom = 'line', xlab="Topics", ylab='Accuracies' )
+
+```
+
+Then plot the result of autonomous methods to determine the best number of topics. 
+```{r}
+# YOUR CODE HERE
+# Finding optimum number of topics dtm is train_text
+result <- FindTopicsNumber(
+  train_text,
+  topics = seq(from = 2, to = 20, by = 2),
+  metrics = c("Griffiths2004", "CaoJuan2009", "Arun2010"),
+  method = "Gibbs",
+  control = list(seed =SEED)
+)
+
+FindTopicsNumber_plot(result)
+
+```
+
+Thirdly, evaluate the best number of topics from the classification task and the three autonomous methods by showing the top 10 keywords for each topic from each method. 
+```{r}
+# YOUR CODE HERE
+
+# For Classification task k =18
+LDA_model <- LDA(train_text, control=list(iter=20, seed=SEED), k=18, method="Gibbs")
+# Max proabilities for each word across topics
+max_word_prob <- apply(exp(LDA_model@beta), 2, max) 
+#sorting and keeping original index
+sorted_prob_list <- sort(max_word_prob, decreasing=T, index.return=T)
+ # List of 10 words
+LDA_model@terms[sorted_prob_list$ix[1:10]] 
+
+# For Griffiths2004 Method k = 10
+LDA_model <- LDA(train_text, control=list(iter=20, seed=SEED), k=8, method="Gibbs")
+# Max proabilities for each word across topics
+max_word_prob <- apply(exp(LDA_model@beta), 2, max) 
+#sorting and keeping original index
+sorted_prob_list <- sort(max_word_prob, decreasing=T, index.return=T)
+ # List of 10 words
+LDA_model@terms[sorted_prob_list$ix[1:10]] 
+
+
+# For CaoJuan2009 Method k =8
+LDA_model <- LDA(train_text, control=list(iter=20, seed=SEED), k=8, method="Gibbs")
+# Max proabilities for each word across topics
+max_word_prob <- apply(exp(LDA_model@beta), 2, max) 
+#sorting and keeping original index
+sorted_prob_list <- sort(max_word_prob, decreasing=T, index.return=T)
+ # List of 10 words
+LDA_model@terms[sorted_prob_list$ix[1:10]] 
+
+# For Arun2010 Method k = 20
+LDA_model <- LDA(train_text, control=list(iter=20, seed=SEED), k=20, method="Gibbs")
+# Max proabilities for each word across topics
+max_word_prob <- apply(exp(LDA_model@beta), 2, max) 
+#sorting and keeping original index
+sorted_prob_list <- sort(max_word_prob, decreasing=T, index.return=T)
+ # List of 10 words
+LDA_model@terms[sorted_prob_list$ix[1:10]] 
+
+```
+
+
+Finally, by looking at the top keywords, you can try to determine which model generates the keywords that makes most sense. You can also explore different number of topics by showing their keywords. 
+
+Most of the key words seem same/similar in all methods. Groffiths2004 and CaoJuan2009 gives exactly same results.
+In Graph Arun2010 does not seem to give lot meaningful information. 
+I think we can go with CaoJuan2009.
+
+
+

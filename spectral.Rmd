@@ -1,0 +1,257 @@
+---
+title: "Clustering Using Spectral Graph Theory"
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+  pdf_document: 
+    toc: yes
+---
+```{r , echo=FALSE}
+## Download and install the package
+#install.packages("igraph")
+
+## Load package
+rm (list = ls())
+library(igraph)
+library(ggplot2)
+library(cccd)
+library(base)
+library(proxy)
+library(fcd)
+library(knitr)
+library(rmarkdown)
+library(KRLS)
+```
+
+In this project, you will perform a series of exercises that will explore graph spectra and how the spectra can be used to identify clusters in the data. To help complete this project, you may want to make use of the [igraph](http://cran.r-project.org/web/packages/igraph/igraph.pdf) library.
+
+**Submission Instructions:**
+Complete the following exercises, writing your code as chunks in this file in the appropriate sections. Answer any questions in this markdown file. Submit a zip folder on Moodle containing this RMD file and the generated PDF or html file that shows the executed code and its output.
+
+| Grading Rubric: |   |
+|:-------------|:----------|
+|Implementation |  70 pts. |
+|Discussion Questions |  30 pts. |
+
+
+# Generating the data set
+Write a script that generates a total of 60 points whose (x,y)-coordinates are drawn from a mixture of three Gaussians in a 2-dimensional real space. Each mixture has a mean of 2, 4, and 6, respectively, a standard deviation of one, and about 20 points.
+
+* Plot all the points in a single 2-dimensional space by using different shapes for each mixture.
+* Plot a histogram of all the points.
+
+```{r , echo=FALSE}
+set.seed(888)
+x1 <- rnorm(20, mean = 2, sd = 1)
+y1 <- rnorm(20, mean = 2, sd = 1)
+x2 <- rnorm(20, mean = 4, sd = 1)
+y2 <- rnorm(20, mean = 4, sd = 1)
+x3 <- rnorm(20, mean = 6, sd = 1)
+y3 <- rnorm(20, mean = 6, sd = 1)
+
+df= as.data.frame(rbind( cbind(x1,y1,1), cbind(x2,y2,2), cbind(x3,y3,3)) )
+colnames(df) <- c("X", "Y", "Set")
+df$Set <- as.factor(df$Set)
+ggplot(df,aes(x=X, y=Y, color=Set, shape=Set)) + geom_point(size=5) 
+hist(rbind(df$X,df$Y))
+
+
+
+```
+# Generating the similarity graphs
+Write a script that generates the following similarity graphs for the data set in Exercise 1:
+
+1. KNN: The K-nearest neighbor graph using the value of K=10. Plot the graph.
+
+
+2. GK: The complete similarity graph using the Gaussian kernel with sigma=1 as similarity function.
+
+
+# Characterizing the graph spectra. 
+Write a script that generates the graph Laplacian matrix L = D - A and the normalized graph Laplacian matrix L\_hat = I - A\_hat and calculates the graph spectra for each of the graphs in Exercise 2.
+
+1. Plot each graph's eigenspectra (two laplacians and two normalized laplacians) as a separate figure with i as x-axis and lambda_i (ith eigenvalue) as y-axis (a total of four plots).
+```{r}
+
+#sim_matrix <- as.matrix(simil(df[,-3], method = "Euclidean", upper=TRUE))
+# KNN method K =10
+G1 <-  nng(df[,-3], k=10, mutual = FALSE) # Mutual is false for directed graph
+plot(G1, layout = layout.fruchterman.reingold)
+
+A1 <- get.adjacency(G1) # Adjacency Matrix for graph G
+L1 <- laplacian(A1)  # Laplacian Matrix for graph G
+
+
+D1 <- A1+L1 # Diagnol matrix for cross check
+L1_hat <- laplacian(A1, normalised = T) # Normalized  Laplacian Matrix for graph G
+I = diag(60) # Identity Matrix
+A1_hat <- I - L1_hat # Normalized Adjacency Matrix for graph G
+
+# Gaussian Kernal
+#GK <- G1
+GK <- gausskernel(X=df[,-3], sigma=1)
+
+#
+A2  <- matrix(, nrow = 60, ncol=60)
+for (i in 1:60) {
+  for ( j in 1:60 ) {
+    if (i==j) { A2[i,j] <- 0 
+    }else if (GK[i,j] >= .5) {A2[i,j] <- 1
+    }else {A2[i,j] <- 0 } 
+  }
+}
+ 
+G2 <- graph_from_adjacency_matrix(A2)
+plot(G2, layout = layout.fruchterman.reingold)
+
+L2 <- laplacian(A2, normalised = FALSE)
+L2_hat <- laplacian(A2, normalised = TRUE)
+
+D2 <- A2 + L2
+
+# Eigen values for 1st graph
+E1 <- eigen(L1) # Eigenvalues and Eigenvectors
+ev1 <- sapply(E1$values, Re) # Real part
+plot(x=c(1:60), y=ev1 , title("Eigenvalues for Laplacian of KNN Graph"))
+
+E2 <- eigen(L1_hat) # Eigenvalues and Eigenvectors
+ev2 <- sapply(E2$values, Re) # Real part
+plot(x=c(1:60), y=ev2, title("Eigenvalues for Normalized Laplacian of KNN Graph"))
+
+# Eigen values for 2nd graph
+E3 <- eigen(L2) # Eigenvalues and Eigenvectors
+ev3 <- sapply(E3$values, Re) # Real part
+plot(x=c(1:60), y=ev3 , title("Eigenvalues for Laplacian of Gaussian Graph"))
+
+E4 <- eigen(L2_hat) # Eigenvalues and Eigenvectors
+ev4 <- sapply(E4$values, Re) # Real part
+plot(x=c(1:60), y=ev4, title("Eigenvalues for Normalized Laplacian of Gaussian Graph"))
+
+```
+
+2. What do you observe about the multiplicity of the "close to" zero eigenvalues? Are your observations consistent with the Properties described in the lecture notes?
+```
+For first graph(KNN) multiplicity of the "close to" zero eigenvalues is 1. For 2nd graph (Gausian Kernal) multiplicity of the "close to" zero eigenvalues is more than 1.
+These observations onsistent with the Properties described in the lecture notes as first graph is Connected while 2nd Graph is not (as we see on plat of those graphs)
+```
+
+3. Plot each graph's eigenvector plot for the eigenvector u corresponding to the second smallest eigenvalue, with i as x-axis and u_i vector component as y-axis.
+```{r}
+plot(x = 1:60, y=(E1$vectors)[,59], title("Eigenvectors KNN") )
+plot(x = 1:60, y=(E2$vectors)[,59], title("Eigenvectors KNN Normalized"))
+plot(x = 1:60, y=(E3$vectors)[,59], title("Eigenvectors Gaussian"))
+plot(x = 1:60, y=(E4$vectors)[,59], title("Eigenvectors Gaussian Normalized"))
+
+
+```
+4. If you were using this plot for 2-way graph partitioning into S and V-S, the points from which mixtures will end up in which partition?
+```{r}
+# Community creation with threshold t
+t = 0
+C1 <- c()  # Nodes Community1 
+C2 <- c()  # Nodes Community2 
+for ( i in 1:60 ) {
+if (Re(E1$vectors[i]) >= t) {C1 <- append(C1, i)}
+else {C2 <- append(C2, i)}
+} 
+print(C1) # Points in 1st partition S
+print(C2) # Points in 2nd  partition V-S
+AC1 <- A1[C1, C1] 
+GC1 <- graph_from_adjacency_matrix(AC1)
+plot(GC1, layout = layout.fruchterman.reingold)
+
+AC2 <- A1[C2, C2]
+GC2 <- graph_from_adjacency_matrix(AC2)
+plot(GC2, layout = layout.fruchterman.reingold)
+
+```
+
+5. Calculate the conductance (write the script) for each of the identified partitions, S and V-S for the KNN graph using both the normalized and unnormalized Laplacian.
+```{r}
+#Conductance = CS/(2MS + CS) (As in page 4 of paper provided)
+# for first communinity
+MS <- sum(AC1)  # Number of edges in community C1
+CS <- 0 # Number of cross cutting edges from community C1
+
+# Edges from community node to outside
+for ( i in C1) {
+  CS <- CS + sum(A1[i, -C1])
+}
+# Edges to community node from outside (note it is directed graph)
+for ( i in C1) {
+  CS <- CS + sum(A1[-C1, i])
+}
+
+Conductance.C1 <-  CS/(2*MS + CS)
+print (Conductance.C1)
+
+# for second communinity
+MS <- sum(AC2)  # Number of edges in community C2
+CS <- 0 # Number of cross cutting edges from community C2
+# Edges from community node to outside
+for ( i in C2) {
+  CS <- CS + sum(A1[i, -C2])
+}
+# Edges to community node from outside (note it is directed graph)
+for ( i in C2) {
+  CS <- CS + sum(A1[-C2, i])
+}
+Conductance.C2 <-  CS/(2*MS + CS)
+print (Conductance.C2)
+```
+
+
+6. Calculate the lower and upper bounds for the graph conductance using the inequalities provided in the lecture notes. How does this value compare with the conductance obtained for S or V-S in 3.4?
+
+```{r}
+#With Cheeger’s inequality Conductance lies between (lamda_n-1)/2 and sqrt(2*(lamda_n-1))
+# For community 1
+LC1_hat <- laplacian(AC1, normalised = TRUE)
+EC1 <- eigen(LC1_hat) # Eigenvalues and Eigenvectors
+evC1 <- sapply(EC1$values, Re) # Real part
+min_condutance.C1 = evC1[length(evC1)-1]/2   
+max_condutance.C1 = sqrt(2*evC1[length(evC1)-1])     
+print(min_condutance.C1)
+print(max_condutance.C1)
+
+# For community 2
+LC2_hat <- laplacian(AC2,normalised = T)
+EC2 <- eigen(LC2_hat) # Eigenvalues and Eigenvectors
+evC2 <- sapply(EC2$values, Re) # Real part
+min_condutance.C2 = evC2[length(evC2)-1]/2   
+max_condutance.C2 = sqrt(2*evC2[length(evC2)-1])    
+print(min_condutance.C2)
+print(max_condutance.C2)
+```
+
+
+# Spectral graph clustering
+
+Write a script that performs spectral graph clustering using the normalized graph Laplacian of each of the graph in Exercise 2. The pseudo-code of the clustering method is described in the lecture notes. For the k-means clustering method use the value of k=3.
+
+1. Run the k-means clustering algorithm provided by R on the data set in Exercise 1, using the Euclidean distance as the dissimilarity metric, and the value of k=3. Plot the points in 2-dimensional space but use different shape for each of the identified cluster.
+
+2. Run the spectral graph clustering and plot the corresponding points in Ex.1 with the shapes based on the identified cluster (one plot for each graph). Are there mismatches between the results obtained from spectral graph clustering and the kmeans clustering in 4.1?
+
+```{r}
+# For K=3, Kmeans clustring
+dist_matrix <- as.matrix(dist(df[,-3], method = "Euclidean", upper=TRUE))
+K1 <- kmeans(dist_matrix,3)
+plot(x= K1$cluster, y= 1:60, title("For K=3, Kmeans clustring"))
+
+
+#spectral graph clustering
+norm_vec <- function(x) sqrt(sum(x^2))
+N1 <- matrix( , nrow = 60, ncol = 3)
+N <- (E2$vectors)[,58:60]
+for ( i in 1:60)
+{ N1[i,] <- N[i,]/norm_vec(N[i,]) }
+
+K2 <- kmeans(N1,3)
+plot(x= K2$cluster, y= 1:60, title("Spectral graph clustering"))
+
+```
+
+Yes we get different groupings of points but similar

@@ -1,0 +1,230 @@
+---
+title: "Sampling Methods for Learning from Imbalanced Datasets"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: spacelab
+---
+# Students Names 
+Sampann Nigam  & Raghava Viswanathaiah
+
+# Loading Relevant Packages
+
+Here are some packages you will probably want to load. You may have to install these packages if you haven't before. Also, if you use other packages in the rest of your code, add the packages to this list.
+```{r message=FALSE}
+rm(list=ls())
+library(caret)
+library(unbalanced)
+library(pROC)
+library(rpart)
+library(ggplot2)
+library(reshape)
+setwd("~/Desktop/DS/AMLHW")
+#setwd("C:\\Users\\vraghava\\Downloads\\Data Science\\AdvancedMachineLearning\\Assignment-1\\Option1")
+```
+
+# Introduction
+We will be testing several sampling methods as specified in the instruction PDF. We will store the function names as follows:
+
+```{r}
+sampleMethods <- c("None","ubUnder","ubOver","ubTomek","ubCNN","ubOSS","ubENN","ubNCL","ubSMOTE")
+```
+We will be testing these sampling methods over the following datasets:
+```{r}
+datasets <- c("haberman", "pima", "ecoli")
+```
+For this assignment, we will be analyzing how well the sampling methods work at improving predictions for unbalanced datasets. Therefore, we will perform 10-fold classification using the sampling methods and not using the sampling methods and compare the F-Measures and AUCs. In total, we will keep four data frames for storing results, one for F-Measure, AUC, std of the F-Measure, and std of the AUC. The rows of the data frames will correspond to the datasets and the colums will correspond to the sampling method.
+```{r}
+n <- length(datasets)
+m <- length(sampleMethods)
+
+df_fm <- data.frame(matrix(numeric(), n, m), row.names=datasets)
+df_auc <- data.frame(matrix(numeric(), n, m), row.names=datasets)
+df_stdfm <- data.frame(matrix(numeric(), n, m), row.names=datasets)
+df_stdauc <- data.frame(matrix(numeric(), n, m), row.names=datasets)
+
+names(df_fm) <- sampleMethods
+names(df_auc) <- sampleMethods
+names(df_stdfm) <- sampleMethods
+names(df_stdauc) <- sampleMethods
+```
+
+
+
+# Prepping Datasets
+The unbalanced packages require that the majority class has the class label of 0 and that the minority class has the class label of 1. This is given in the datasets, so you must make a function that converts them as such. Also, label the class column as "class" when reading in this data. The `relabel` function that you must complete should take as input the dataframe as read from the data file and the column index of the class label (in some datasets this is the first index and in some it is the last) and should relabel the classes to be 0 or 1 (as factors) and label the class column as "class".
+```{r}
+relabel <- function(df, col_pos){
+ names(df)[col_pos] <- "class"
+a <- as.data.frame(table(df[,col_pos]))
+major = {}
+minor = {}
+if ( a[1,'Freq'] < a[2,'Freq'])  # if first row is minority class
+  { 
+  minor <- which(df$class == a[1,1])
+  major <- which(df$class == a[2,1])
+  }
+else if ( a[2,'Freq'] < a[1,'Freq']) #if 2nd row is minority class
+  {
+  minor <- which(df$class == a[2,1])
+  major <- which(df$class == a[1,1])
+  }
+df$class[minor] <- 1
+df$class[major] <- 0
+return(df)
+}
+```
+
+```{r}
+#haberman <- relabel(read.csv("datasets/haberman.data"), 4)
+#pima <- relabel(read.csv("datasets/pima-indians-diabetes.data"), 9)
+#ecoli <- relabel(read.csv("datasets/ecoli.data"), 8)
+haberman <- relabel(read.csv("datasets/haberman.data"), 4)
+pima <- relabel(read.csv("datasets/pima-indians-diabetes.data"), 9)
+ecoli <- relabel(read.csv("datasets/ecoli.data"), 8)
+datasets = list(haberman, pima, ecoli)
+names(datasets) <- c("haberman", "pima", "ecoli")
+```
+
+
+# Metrics
+To measure AUC, we can use the function `auc` from the pROC package. For F-Measure, you must create your own function that compute the f-measure for a binary class classification. The input is given as two vectors of class labels.
+```{r}
+fMeasure <- function(actual_labels, predict){
+precision <- sum(predict & actual_labels) / sum(predict)
+recall <- sum(predict & actual_labels) / sum(actual_labels)
+f_measure <- 2 * precision * recall / (precision + recall)
+return(f_measure)
+}
+```
+
+
+# Generating Results: Normal
+First, you should build a classifier for each dataset. For this project, you will use Decision Trees as implemented in the rpart R package (you may use rparts’s default parameters but with type="class"). Create a function called `pred` that takes as input a list of folds (output of the `createFolds` function) and a data frame. This function should perform rpart and return a list of four values: average F-Measure, average AUC, std of the F-Measure, and std of the AUC over the 10 folds.
+
+```{r}
+pred <- function(folds, data){
+foldslist <- folds
+allidx <- c(1:nrow(data))
+AUC=numeric()
+FM=numeric()
+for(i in 1:10){
+    testidx <- foldslist[[i]]
+    trainidx <-  setdiff(allidx, testidx)
+    fit <- rpart (class~., data = data[trainidx,], method = "class")
+    predictions <- as.numeric(predict(fit,  data[testidx,!colnames(data) %in% c("class")], type="class" ))
+    ROC <- roc(data[testidx,"class"],predictions )
+    AUC[i] <- auc(ROC)
+    FM[i] <- fMeasure(data[testidx,"class"],predictions )
+}
+return(list( MeanFM=mean(FM), MeanAUC=mean(AUC),StdFM=sd(FM),StdAUC=sd(AUC)))
+}
+```
+
+# Generating Results: With Sampling Methods performed
+Next, create a function called `pred_balanced` that is similar to the `pred` function, except that the sampling method is performed on the dataset before training your model. The sampling method will be passed as a third parameter `sampl`.
+
+```{r}
+pred_balanced <- function(folds, data, sampl){
+f<-getFunction(sampl) 
+foldslist <- folds
+allidx <- c(1:nrow(data))
+AUC=numeric()
+FM=numeric()
+for(i in 1:10){
+    testidx <- foldslist[[i]]
+    trainidx <-  setdiff(allidx, testidx)
+    cnames <- names(data)
+    baldata <- f ( X=data[trainidx,!colnames(data) %in% c("class")], Y=as.factor(data[trainidx,"class"]))
+    newData<-cbind(baldata$X, baldata$Y)
+    colnames(newData) <- cnames
+    fit <- rpart (class~., data = newData, method = "class")
+    predictions <- as.numeric(predict(fit,  data[testidx,!colnames(data) %in% c("class")], type="class" ))
+    ROC <- roc(data[testidx,"class"],predictions )
+    AUC[i] <- auc(ROC)
+    FM[i] <- fMeasure(data[testidx,"class"],predictions )
+}
+
+return(list( MeanFM=mean(FM), MeanAUC=mean(AUC),StdFM=sd(FM),StdAUC=sd(AUC)))
+}
+```
+
+# Generating Performance Data into Data-Frames
+Using those functions, we will now generate the data for each dataset and each sampling method. Loop over the datasets and sampling methods and use the functions to fill in ]the four data frames completely. The `getFunction` command will probably be useful to you here. Also, make sure you only generate the folds once per dataset, so that you are using the same folds for each sampling method.
+
+```{r results="hide"}
+measures =list( MeanFM=NA, MeanAUC=NA,StdFM=NA,StdAUC=NA)
+name <- ""
+name = "haberman"
+for (name in names(datasets)){
+  # Generate folds
+  df <- eval(parse(text = name))
+  folds <- createFolds(df$class, k = 10, list = TRUE, returnTrain = FALSE)
+  for (sampl in sampleMethods){
+    # Test and update results
+    if (sampl == "None") {
+      measures <- pred(folds, df)
+    }
+    else {
+     measures <-  pred_balanced(folds, df, sampl)
+    }
+    df_fm[name,sampl] = measures[["MeanFM"]]
+    df_auc[name,sampl] = measures[["MeanAUC"]]
+    df_stdfm[name,sampl] = measures[["StdFM"]]
+    df_stdauc[name,sampl] = measures[["StdAUC"]]
+  }
+}
+```
+
+# Plotting F-Measure and AUC For Different Sampling Menthods
+
+Now, plot and analyze your results and answer the questions from the PDF.
+
+```{r}
+plotperf <- function(df, plot_title) {
+Dataset  <- rownames(df)
+df_1 = cbind(Dataset, df)
+df_1 = melt(df_1)
+p =  ggplot(df_1, aes(x=variable, y=value, group=Dataset)) + geom_line(aes(colour=Dataset)) + labs(x="Sampling Methods", y="Performance Metrics") + ggtitle(plot_title)+ theme(axis.text.x=element_text(angle=45))
+return(p)
+}
+#par(mfrow=c(2,2))
+print ( paste ("Imbalance in haberman dataset = ", sum(haberman$class)/dim(haberman)[1]))
+print ( paste ("Imbalance in pima dataset = ", sum(pima$class)/dim(pima)[1]))
+print ( paste ("Imbalance in ecoli dataset = ", sum(ecoli$class)/dim(ecoli)[1]))
+
+print("Table for F-Measure by Sampling Methods and Datasets")
+df_fm
+print("Table AUC by Sampling Methods and Datasets")
+df_auc
+print("Table Std Dev in F-Measure by Sampling Methods and Datasets")
+df_stdfm
+print("Table Std Dev in AUC by Sampling Methods and Datasets")
+df_stdauc
+
+plotperf(df_fm, "F-Measure by Sampling Methods and Datasets")
+plotperf(df_auc, "AUC by Sampling Methods and Datasets")
+plotperf(df_stdfm, "Std Dev in F-Measure by Sampling Methods and Datasets")
+plotperf(df_auc, "Std Dev in AUC by Sampling Methods and Datasets")
+```
+
+# Results
+
+- We have ecoli as most unbalanced class (10% Minority), followed by haberman(27% Minority) and pima (35% Minority)
+
+- In F-Measure performance we see most imbalanced class has worst performance and least imbalanced class pima has best performance. Though it is not true for AUC (it is reversed in AUC).
+
+- For AUC , We are seeing most impact of Sampling Methos in most imbalanced class ecoli 
+
+- Not all sampling methods are adding performance. Some are even degrading it.
+
+- For F-measure random undersampling is always worse in this data set.
+  
+- For F-measure informed sampling methods are generally giving better     performance , which can not be said for AUC.
+  
+- For most imbalanced set , standard deviations in metrics from different folds is high and least in the least imbalanced set.
+
+
+
